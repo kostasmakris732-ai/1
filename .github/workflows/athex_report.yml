@@ -1,0 +1,103 @@
+name: ΧΑΑ Αναφορά Αγοράς
+
+# Σημείωση για τα χρονοδιαγράμματα: το GitHub Actions cron δουλεύει μόνο σε UTC
+# και δεν προσαρμόζεται αυτόματα στην αλλαγή θερινής/χειμερινής ώρας Ελλάδας
+# (EEST = UTC+3, EET = UTC+2). Το 06:30 UTC αντιστοιχεί σε 09:30 EEST (καλοκαίρι)
+# ή 08:30 EET (χειμώνας) — και στις δύο περιπτώσεις αρκετά πριν την προσυνεδρίαση
+# του ΧΑΑ (10:00) και την έναρξη συνεχούς διαπραγμάτευσης (10:15).
+#
+# Τα scheduled runs εκτελούνται ΜΟΝΟ από το default branch του repository
+# (περιορισμός του GitHub Actions) — μέχρι να γίνει merge αυτού του PR, το
+# schedule δεν θα ενεργοποιείται, αλλά το workflow_dispatch (on-demand) δουλεύει
+# ήδη σε αυτό το branch.
+
+on:
+  schedule:
+    - cron: "30 6 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "Τίτλος αναφοράς"
+        required: false
+        default: "Ενδοσυνεδριακή Ενημέρωση ΧΑΑ"
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: athex-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate report and dashboard
+        env:
+          PYTHONPATH: src
+          REPORT_TITLE: ${{ github.event.inputs.title || 'Πρωινή Αναφορά ΧΑΑ' }}
+        run: |
+          python -m athex_analyst.cli \
+            --report reports/premarket.md \
+            --dashboard reports/dashboard.html \
+            --title "$REPORT_TITLE"
+
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: athex-dashboard
+          path: reports/dashboard.html
+          retention-days: 30
+
+      - name: Commit report to repository
+        run: |
+          git config user.name "athex-analyst-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add reports/premarket.md reports/dashboard.html
+          git diff --cached --quiet || git commit -m "chore: ενημέρωση αναφοράς ΧΑΑ [skip ci]"
+          git push
+
+      - name: Open or update report issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const body = fs.readFileSync("reports/premarket.md", "utf8");
+            const today = new Date().toISOString().slice(0, 10);
+            const title = `ΧΑΑ Αναφορά — ${today}`;
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "athex-report",
+            });
+            const existing = issues.find((i) => i.title === title);
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["athex-report"],
+              });
+            }
