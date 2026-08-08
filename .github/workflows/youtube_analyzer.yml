@@ -4,7 +4,7 @@ name: YouTube Analyzer
 # YouTube/διαδίκτυο, οπότε η πραγματική λήψη/ανάλυση βίντεο δεν μπορεί να
 # γίνει μέσα σε μια συνομιλία chat. Αυτό το workflow τρέχει on-demand με
 # πλήρη πρόσβαση internet, φτιάχνει (ή ενημερώνει) τη βιβλιοθήκη ανάλυσης στο
-# repo, και ανεβάζει την αναφορά/υπότιτλους ως workflow artifacts.
+# repo, και ανεβάζει την αναφορά/υπότιτλους/tab ως workflow artifacts.
 
 on:
   workflow_dispatch:
@@ -21,12 +21,18 @@ on:
           - analyze
           - subtitles
           - compare
+          - tab
+          - lesson
       start:
-        description: "(μόνο compare) αρχή αποσπάσματος, π.χ. 12:34"
+        description: "(compare/tab/lesson) αρχή αποσπάσματος, π.χ. 2:25"
         required: false
       end:
-        description: "(μόνο compare) τέλος αποσπάσματος, π.χ. 15:10"
+        description: "(compare/tab/lesson) τέλος αποσπάσματος, π.χ. 3:00"
         required: false
+      max_related:
+        description: "(μόνο lesson) πλήθος σχετικών βίντεο προς αυτόματη αναζήτηση/σύγκριση"
+        required: false
+        default: "5"
 
 permissions:
   contents: write
@@ -46,8 +52,8 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install system dependencies (ffmpeg για ASR/audio)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install system dependencies (ffmpeg για ASR/audio, tesseract-ocr για tab/lesson)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg tesseract-ocr
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
@@ -72,6 +78,25 @@ jobs:
           python -m youtube_analyzer.cli compare "${{ github.event.inputs.video }}" \
             --start "${{ github.event.inputs.start }}" \
             --end "${{ github.event.inputs.end }}"
+
+      - name: Run tab (OCR ταμπλατούρα, συγχρονισμένη με την εικόνα)
+        if: ${{ github.event.inputs.mode == 'tab' }}
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m youtube_analyzer.cli tab "${{ github.event.inputs.video }}" \
+            --start "${{ github.event.inputs.start }}" \
+            --end "${{ github.event.inputs.end }}"
+
+      - name: Run lesson (OCR ταμπλατούρα + αυτόματη αναζήτηση/σύγκριση σχετικών βίντεο)
+        if: ${{ github.event.inputs.mode == 'lesson' }}
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m youtube_analyzer.cli lesson "${{ github.event.inputs.video }}" \
+            --start "${{ github.event.inputs.start }}" \
+            --end "${{ github.event.inputs.end }}" \
+            --max-related "${{ github.event.inputs.max_related }}"
 
       - name: Upload reports/subtitles artifact
         uses: actions/upload-artifact@v4

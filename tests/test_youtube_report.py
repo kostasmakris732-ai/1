@@ -1,5 +1,6 @@
 from youtube_analyzer.models import (
     SegmentMatch,
+    TabFrame,
     TextChunk,
     Transcript,
     TranscriptSegment,
@@ -7,7 +8,12 @@ from youtube_analyzer.models import (
     VideoAnalysis,
     VideoMetadata,
 )
-from youtube_analyzer.report import build_analysis_markdown, build_compare_markdown
+from youtube_analyzer.report import (
+    build_analysis_markdown,
+    build_compare_markdown,
+    build_lesson_markdown,
+    build_tab_markdown,
+)
 
 
 def _analysis():
@@ -56,4 +62,42 @@ def test_build_compare_markdown_with_matches():
 
 def test_build_compare_markdown_no_matches():
     md = build_compare_markdown(_analysis(), start=0, end=45, matches=[])
+    assert "Δεν βρέθηκαν" in md
+
+
+def test_build_tab_markdown_with_frames():
+    tab_frames = [
+        TabFrame(start=145, end=150, text="e|-0-2-3-|\nB|-1-3-1-|"),
+        TabFrame(start=150, end=160, text="e|-5-7-8-|\nB|-6-8-6-|"),
+    ]
+    md = build_tab_markdown(_analysis(), start=145, end=180, tab_frames=tab_frames)
+    assert "Ταμπλατούρα (OCR)" in md
+    assert "e|-0-2-3-|" in md
+    assert "e|-5-7-8-|" in md
+    assert "```" in md
+    assert "youtu.be/abc12345678?t=145s" in md
+
+
+def test_build_tab_markdown_no_frames():
+    md = build_tab_markdown(_analysis(), start=145, end=180, tab_frames=[])
+    assert "Δεν εντοπίστηκε" in md
+
+
+def test_build_lesson_markdown_combines_tab_and_matches():
+    tab_frames = [TabFrame(start=145, end=150, text="e|-0-2-3-|")]
+    matches = [
+        SegmentMatch(video_id="other0001a", title="Σχετικό Μάθημα", start=30, end=60, score=0.5, snippet="ίδιο riff εδώ"),
+    ]
+    md = build_lesson_markdown(_analysis(), start=145, end=180, matches=matches, tab_frames=tab_frames)
+    assert "Μάθημα:" in md
+    assert "🎸" in md
+    assert "e|-0-2-3-|" in md
+    assert "Σχετικό Μάθημα" in md
+    assert "50%" in md
+    assert "ίδιο riff εδώ" in md
+
+
+def test_build_lesson_markdown_no_tab_no_matches():
+    md = build_lesson_markdown(_analysis(), start=145, end=180, matches=[], tab_frames=[])
+    assert "Δεν εντοπίστηκε" in md
     assert "Δεν βρέθηκαν" in md

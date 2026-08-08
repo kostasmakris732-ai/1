@@ -1,6 +1,6 @@
 import pytest
 
-from youtube_analyzer.youtube_client import canonical_url, extract_video_id
+from youtube_analyzer.youtube_client import canonical_url, extract_video_id, filter_search_results
 
 
 @pytest.mark.parametrize(
@@ -26,3 +26,21 @@ def test_extract_video_id_invalid_raises():
 
 def test_canonical_url():
     assert canonical_url("dQw4w9WgXcQ") == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+
+def test_filter_search_results_excludes_source_and_dedupes():
+    entries = [
+        {"id": "source0001a", "title": "Το ίδιο το πηγαίο βίντεο"},
+        {"id": "related0001", "title": "Σχετικό 1"},
+        {"id": "related0001", "title": "Διπλότυπο"},
+        {"id": None, "title": "Χωρίς id"},
+        {"id": "related0002", "title": "Σχετικό 2"},
+    ]
+    ids = filter_search_results(entries, exclude_video_id="source0001a", max_results=5)
+    assert ids == ["related0001", "related0002"]
+
+
+def test_filter_search_results_respects_max_results():
+    entries = [{"id": f"vid{i:08d}"} for i in range(10)]
+    ids = filter_search_results(entries, exclude_video_id="none", max_results=3)
+    assert len(ids) == 3

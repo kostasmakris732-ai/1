@@ -92,3 +92,15 @@ class SegmentMatch:
     end: float
     score: float
     snippet: str
+
+
+@dataclass
+class TabFrame:
+    """Ένα σταθερό διάστημα όπου η ταμπλατούρα/notation στην οθόνη παρέμεινε
+    ίδια — προκύπτει από συνένωση (dedupe) διαδοχικών OCR δειγμάτων πάνω σε
+    frames του βίντεο, ώστε κάθε γραμμή tab να εμφανίζεται μία φορά με το
+    σωστό, συγχρονισμένο χρονικό της παράθυρο."""
+
+    start: float
+    end: float
+    text: str

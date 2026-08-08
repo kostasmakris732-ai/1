@@ -80,3 +80,50 @@ def build_greek_subtitles(url_or_id: str, asr_model: str = DEFAULT_MODEL_SIZE) -
     if transcript.language and transcript.language.startswith("el"):
         return transcript.segments
     return translate_segments_to_greek(transcript.segments, source_lang=transcript.language or "auto")
+
+
+def build_lesson_report(
+    url_or_id: str,
+    start: float,
+    end: float,
+    max_related: int = 5,
+    fps: float = 1.0,
+    crop_bottom_fraction: float | None = 0.5,
+    asr_model: str = DEFAULT_MODEL_SIZE,
+    library_dir: str | None = None,
+):
+    """Πλήρες «μάθημα»: (1) αναλύει το πηγαίο βίντεο, (2) αναζητά μόνο του
+    σχετικά βίντεο στο YouTube με βάση τον τίτλο και τα αναλύει κι αυτά ώστε
+    να μπουν στη βιβλιοθήκη, (3) συγκρίνει το [start, end] απόσπασμα έναντι
+    όλης της βιβλιοθήκης, και (4) διαβάζει με OCR το tab/notation που
+    εμφανίζεται στην οθόνη στο ίδιο διάστημα, συγχρονισμένο με τον χρόνο.
+
+    Επιστρέφει (source: VideoAnalysis, matches: list[SegmentMatch], tab_frames: list[TabFrame]).
+    """
+    from . import youtube_client
+    from .compare import compare_segment
+    from .library import DEFAULT_LIBRARY_DIR, load_all, save_analysis
+    from .ocr_tab import extract_tab_ocr
+
+    library_dir = library_dir or DEFAULT_LIBRARY_DIR
+
+    source = analyze_video(url_or_id, asr_model=asr_model)
+    save_analysis(source, library_dir=library_dir)
+
+    related_entries = youtube_client.search_videos(source.metadata.title, max_results=max_related + 1)
+    related_ids = youtube_client.filter_search_results(
+        related_entries, exclude_video_id=source.metadata.video_id, max_results=max_related
+    )
+    for vid in related_ids:
+        try:
+            related = analyze_video(vid, asr_model=asr_model)
+            save_analysis(related, library_dir=library_dir)
+        except Exception:
+            logger.warning("Παράλειψη σχετικού βίντεο %s (αποτυχία ανάλυσης)", vid, exc_info=True)
+
+    corpus = load_all(library_dir=library_dir)
+    matches = compare_segment(source, start, end, corpus)
+
+    tab_frames = extract_tab_ocr(url_or_id, start, end, fps=fps, crop_bottom_fraction=crop_bottom_fraction)
+
+    return source, matches, tab_frames
