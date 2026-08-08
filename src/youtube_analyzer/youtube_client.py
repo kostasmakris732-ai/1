@@ -17,6 +17,22 @@ _URL_PATTERNS = [
     re.compile(r"(?:v=|/)([a-zA-Z0-9_-]{11})(?:[&?/]|$)"),
 ]
 
+# Οι web/mweb clients του yt-dlp πυροδοτούν συχνά το bot-check του YouTube
+# ("Sign in to confirm you're not a bot") σε IP εικονικών μηχανών (π.χ.
+# GitHub Actions runners). Οι android/ios clients δεν απαιτούν το ίδιο
+# PO token και συνήθως το αποφεύγουν χωρίς να χρειάζονται cookies σύνδεσης.
+_PLAYER_CLIENT_FALLBACK = {"youtube": {"player_client": ["android", "ios", "web"]}}
+
+
+def _base_ydl_opts(**overrides) -> dict:
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extractor_args": _PLAYER_CLIENT_FALLBACK,
+    }
+    opts.update(overrides)
+    return opts
+
 
 def extract_video_id(url_or_id: str) -> str:
     """Εξάγει το 11-χαρακτήρων video ID από URL ή το επιστρέφει ως έχει αν
@@ -43,7 +59,7 @@ def fetch_metadata(url_or_id: str) -> VideoMetadata:
     video_id = extract_video_id(url_or_id)
     url = canonical_url(video_id)
 
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+    opts = _base_ydl_opts(skip_download=True)
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
@@ -131,15 +147,11 @@ def download_audio(url_or_id: str, out_dir: str) -> str:
     url = canonical_url(video_id)
     out_template = os.path.join(out_dir, f"{video_id}.%(ext)s")
 
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "format": "bestaudio/best",
-        "outtmpl": out_template,
-        "postprocessors": [
-            {"key": "FFmpegExtractAudio", "preferredcodec": "wav", "preferredquality": "192"}
-        ],
-    }
+    opts = _base_ydl_opts(
+        format="bestaudio/best",
+        outtmpl=out_template,
+        postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": "wav", "preferredquality": "192"}],
+    )
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
 
@@ -151,7 +163,7 @@ def search_videos(query: str, max_results: int = 5) -> list[dict]:
     επιστρέφει ελαφριά αποτελέσματα (id, title, url, ...)."""
     import yt_dlp
 
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "extract_flat": "in_playlist"}
+    opts = _base_ydl_opts(skip_download=True, extract_flat="in_playlist")
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
     return info.get("entries") or []

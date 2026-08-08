@@ -72,21 +72,19 @@ def download_clip(url_or_id: str, start: float, end: float, out_dir: str) -> str
 
     import yt_dlp
 
-    from .youtube_client import canonical_url, extract_video_id
+    from .youtube_client import _base_ydl_opts, canonical_url, extract_video_id
 
     video_id = extract_video_id(url_or_id)
     url = canonical_url(video_id)
     out_template = os.path.join(out_dir, f"{video_id}_clip.%(ext)s")
 
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "format": "bestvideo[height<=720]+bestaudio/best[height<=720]",
-        "outtmpl": out_template,
-        "download_ranges": yt_dlp.utils.download_range_func(None, [(start, end)]),
-        "force_keyframes_at_cuts": True,
-        "merge_output_format": "mp4",
-    }
+    opts = _base_ydl_opts(
+        format="bestvideo[height<=720]+bestaudio/best[height<=720]",
+        outtmpl=out_template,
+        download_ranges=yt_dlp.utils.download_range_func(None, [(start, end)]),
+        force_keyframes_at_cuts=True,
+        merge_output_format="mp4",
+    )
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
 
