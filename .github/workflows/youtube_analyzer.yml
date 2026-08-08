@@ -1,0 +1,89 @@
+name: YouTube Analyzer
+
+# Το sandbox όπου τρέχει ο Claude agent session δεν έχει γενικά πρόσβαση στο
+# YouTube/διαδίκτυο, οπότε η πραγματική λήψη/ανάλυση βίντεο δεν μπορεί να
+# γίνει μέσα σε μια συνομιλία chat. Αυτό το workflow τρέχει on-demand με
+# πλήρη πρόσβαση internet, φτιάχνει (ή ενημερώνει) τη βιβλιοθήκη ανάλυσης στο
+# repo, και ανεβάζει την αναφορά/υπότιτλους ως workflow artifacts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      video:
+        description: "YouTube URL ή video ID"
+        required: true
+      mode:
+        description: "Λειτουργία"
+        required: true
+        default: "analyze"
+        type: choice
+        options:
+          - analyze
+          - subtitles
+          - compare
+      start:
+        description: "(μόνο compare) αρχή αποσπάσματος, π.χ. 12:34"
+        required: false
+      end:
+        description: "(μόνο compare) τέλος αποσπάσματος, π.χ. 15:10"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: youtube-analyzer
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install system dependencies (ffmpeg για ASR/audio)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run analyze
+        if: ${{ github.event.inputs.mode == 'analyze' }}
+        env:
+          PYTHONPATH: src
+        run: python -m youtube_analyzer.cli analyze "${{ github.event.inputs.video }}"
+
+      - name: Run subtitles
+        if: ${{ github.event.inputs.mode == 'subtitles' }}
+        env:
+          PYTHONPATH: src
+        run: python -m youtube_analyzer.cli subtitles "${{ github.event.inputs.video }}"
+
+      - name: Run compare
+        if: ${{ github.event.inputs.mode == 'compare' }}
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m youtube_analyzer.cli compare "${{ github.event.inputs.video }}" \
+            --start "${{ github.event.inputs.start }}" \
+            --end "${{ github.event.inputs.end }}"
+
+      - name: Upload reports/subtitles artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-analyzer-output
+          path: reports/youtube/
+          retention-days: 30
+
+      - name: Commit library + reports to repository
+        run: |
+          git config user.name "youtube-analyzer-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/youtube_library reports/youtube
+          git diff --cached --quiet || git commit -m "chore: ενημέρωση youtube_analyzer βιβλιοθήκης/αναφορών [skip ci]"
+          git push
