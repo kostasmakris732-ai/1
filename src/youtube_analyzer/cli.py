@@ -4,6 +4,8 @@ Usage:
     python -m youtube_analyzer.cli analyze <url_or_id> [--report PATH] [--no-library]
     python -m youtube_analyzer.cli subtitles <url_or_id> [--out PATH] [--lang el]
     python -m youtube_analyzer.cli compare <url_or_id> --start 12:34 --end 15:10 [--report PATH]
+    python -m youtube_analyzer.cli tab <url_or_id> --start 2:25 --end 3:00 [--fps 1.0]
+    python -m youtube_analyzer.cli lesson <url_or_id> --start 2:25 --end 3:00 [--max-related 5]
     python -m youtube_analyzer.cli library-list
 """
 
@@ -96,6 +98,67 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tab(args: argparse.Namespace) -> int:
+    from .library import load_analysis
+    from .ocr_tab import extract_tab_ocr
+    from .report import build_tab_markdown
+    from .youtube_client import fetch_metadata
+    from .models import Transcript, VideoAnalysis
+
+    video_id = extract_video_id(args.url)
+    start = parse_timecode(args.start)
+    end = parse_timecode(args.end)
+    if end <= start:
+        logger.error("Το --end πρέπει να είναι μετά το --start")
+        return 1
+
+    source = load_analysis(video_id, library_dir=args.library_dir)
+    if source is None:
+        metadata = fetch_metadata(args.url)
+        source = VideoAnalysis(metadata=metadata, transcript=Transcript(video_id=video_id, language="und", source="captions"))
+
+    tab_frames = extract_tab_ocr(args.url, start, end, fps=args.fps, crop_bottom_fraction=args.crop)
+
+    md = build_tab_markdown(source, start, end, tab_frames)
+    report_path = args.report_path or f"reports/youtube/{video_id}.tab.md"
+    Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(report_path).write_text(md, encoding="utf-8")
+    logger.info("Αναφορά ταμπλατούρας γράφτηκε στο %s (%d frames)", report_path, len(tab_frames))
+    print(md)
+    return 0
+
+
+def cmd_lesson(args: argparse.Namespace) -> int:
+    from .pipeline import build_lesson_report
+    from .report import build_lesson_markdown
+
+    video_id = extract_video_id(args.url)
+    start = parse_timecode(args.start)
+    end = parse_timecode(args.end)
+    if end <= start:
+        logger.error("Το --end πρέπει να είναι μετά το --start")
+        return 1
+
+    source, matches, tab_frames = build_lesson_report(
+        args.url,
+        start,
+        end,
+        max_related=args.max_related,
+        fps=args.fps,
+        crop_bottom_fraction=args.crop,
+        asr_model=args.asr_model,
+        library_dir=args.library_dir,
+    )
+
+    md = build_lesson_markdown(source, start, end, matches, tab_frames)
+    report_path = args.report_path or f"reports/youtube/{video_id}.lesson.md"
+    Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(report_path).write_text(md, encoding="utf-8")
+    logger.info("Αναφορά μαθήματος γράφτηκε στο %s", report_path)
+    print(md)
+    return 0
+
+
 def cmd_library_list(args: argparse.Namespace) -> int:
     ids = list_video_ids(library_dir=args.library_dir)
     if not ids:
@@ -136,6 +199,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_compare.add_argument("--report", dest="report_path", default=None, help="Path εξόδου Markdown")
     p_compare.add_argument("--asr-model", default="small", help="Μέγεθος μοντέλου Whisper για ASR fallback")
     p_compare.set_defaults(func=cmd_compare)
+
+    p_tab = sub.add_parser("tab", help="Ανάγνωση (OCR) ταμπλατούρας από την οθόνη, συγχρονισμένη με τον χρόνο")
+    p_tab.add_argument("url", help="YouTube URL ή video ID")
+    p_tab.add_argument("--start", required=True, help="Αρχή αποσπάσματος (π.χ. 2:25)")
+    p_tab.add_argument("--end", required=True, help="Τέλος αποσπάσματος (π.χ. 3:00)")
+    p_tab.add_argument("--fps", type=float, default=1.0, help="Ρυθμός δειγματοληψίας frames για OCR")
+    p_tab.add_argument("--crop", type=float, default=0.5, help="Ποσοστό κάτω μέρους της εικόνας για OCR (0-1)")
+    p_tab.add_argument("--report", dest="report_path", default=None, help="Path εξόδου Markdown")
+    p_tab.set_defaults(func=cmd_tab)
+
+    p_lesson = sub.add_parser(
+        "lesson",
+        help="Πλήρες μάθημα: OCR ταμπλατούρα συγχρονισμένη με την εικόνα + αυτόματη αναζήτηση/σύγκριση με σχετικά βίντεο",
+    )
+    p_lesson.add_argument("url", help="YouTube URL ή video ID")
+    p_lesson.add_argument("--start", required=True, help="Αρχή αποσπάσματος (π.χ. 2:25)")
+    p_lesson.add_argument("--end", required=True, help="Τέλος αποσπάσματος (π.χ. 3:00)")
+    p_lesson.add_argument("--max-related", type=int, default=5, help="Πλήθος σχετικών βίντεο προς αναζήτηση/ανάλυση")
+    p_lesson.add_argument("--fps", type=float, default=1.0, help="Ρυθμός δειγματοληψίας frames για OCR")
+    p_lesson.add_argument("--crop", type=float, default=0.5, help="Ποσοστό κάτω μέρους της εικόνας για OCR (0-1)")
+    p_lesson.add_argument("--asr-model", default="small", help="Μέγεθος μοντέλου Whisper για ASR fallback")
+    p_lesson.add_argument("--report", dest="report_path", default=None, help="Path εξόδου Markdown")
+    p_lesson.set_defaults(func=cmd_lesson)
 
     p_lib = sub.add_parser("library-list", help="Λίστα αναλυμένων βίντεο στη βιβλιοθήκη")
     p_lib.set_defaults(func=cmd_library_list)

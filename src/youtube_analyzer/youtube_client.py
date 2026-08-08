@@ -144,3 +144,31 @@ def download_audio(url_or_id: str, out_dir: str) -> str:
         ydl.download([url])
 
     return os.path.join(out_dir, f"{video_id}.wav")
+
+
+def search_videos(query: str, max_results: int = 5) -> list[dict]:
+    """Αναζητά στο YouTube (χωρίς API key, μέσω yt-dlp `ytsearch`) και
+    επιστρέφει ελαφριά αποτελέσματα (id, title, url, ...)."""
+    import yt_dlp
+
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "extract_flat": "in_playlist"}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
+    return info.get("entries") or []
+
+
+def filter_search_results(entries: list[dict], exclude_video_id: str, max_results: int) -> list[str]:
+    """Καθαρή λογική: από τα ακατέργαστα αποτελέσματα search_videos, κρατά τα
+    πρώτα max_results έγκυρα video IDs, αποκλείοντας το ίδιο το πηγαίο βίντεο
+    και τυχόν διπλότυπα/ελλιπείς εγγραφές."""
+    seen: set[str] = set()
+    ids: list[str] = []
+    for entry in entries:
+        vid = entry.get("id")
+        if not vid or vid == exclude_video_id or vid in seen:
+            continue
+        seen.add(vid)
+        ids.append(vid)
+        if len(ids) >= max_results:
+            break
+    return ids
